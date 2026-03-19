@@ -14,7 +14,7 @@ const crypto    = require('crypto');
 require('dotenv').config();
 
 const app  = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 
 // ── Database Setup ─────────────────────────────────────────────
 const db = new sqlite3.Database(path.join(__dirname, 'registrations.db'), (err) => {
