@@ -209,7 +209,7 @@ app.get('/api/stats', (req, res) => {
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // ── Start ───────────────────────────────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`
   ╔══════════════════════════════════════════╗
   ║       HACKFORGE 2025 — SERVER READY      ║
