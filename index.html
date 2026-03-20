@@ -938,14 +938,14 @@ document.getElementById('capAnswer').addEventListener('input',function(){
 /* ── COLLECT MEMBER NAMES ── */
 function getMemberDetails(){
   const blocks=document.querySelectorAll('.member-block');
-  let lines=[];
+  let members=[];
   blocks.forEach((b,i)=>{
     const inputs=b.querySelectorAll('input');
     const name=inputs[0]?inputs[0].value.trim():'';
     const email=inputs[1]?inputs[1].value.trim():'';
-    if(name||email) lines.push(`Member ${i+2}: ${name} | ${email}`);
+    members.push({role:'Member '+(i+2),name:name||'',email:email||'',phone:''});
   });
-  return lines.join('\n')||'—';
+  return members;
 }
 
 /* ── SEND EMAIL VIA EMAILJS ── */
@@ -971,7 +971,7 @@ async function sendEmail(params){
   });
 }
 
-/* ── CONVERT FILE TO BASE64 ── */
+/* ── FILE TO BASE64 ── */
 function fileToBase64(file){
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
@@ -1021,6 +1021,14 @@ async function submitForm(){
   const track=document.getElementById('reg-track').value;
   const size=document.getElementById('team-size').value;
   const fee=feeMap[parseInt(size)].amount;
+
+  // Build members array — leader + other members
+  const otherMembers = getMemberDetails(); // now returns array of objects
+  const allMembers = [
+    {role:'Team Leader', name:document.getElementById('m1-name').value.trim(), email:document.getElementById('m1-email').value.trim(), phone:document.getElementById('m1-phone').value.trim()},
+    ...otherMembers
+  ];
+
   const params={
     teamName:     document.getElementById('team-name').value.trim(),
     college:      document.getElementById('college-name').value.trim(),
@@ -1033,59 +1041,49 @@ async function submitForm(){
     utr:          document.getElementById('utr-number').value.trim(),
     projectTitle: document.getElementById('project-title').value.trim(),
     projectDesc:  document.getElementById('project-desc').value.trim(),
-    members:      getMemberDetails()
+    members:      allMembers.map(m=>m.name).join(', ')
   };
 
   // show sending overlay
   document.getElementById('sendingOverlay').classList.add('show');
 
-  // ── Convert payment screenshot to base64 ──
+  // Convert screenshot to base64
   let paymentScreenshot='';
-  try{
-    paymentScreenshot=await fileToBase64(payFile.files[0]);
-  }catch(e){ console.warn('Screenshot conversion failed',e); }
+  try{ paymentScreenshot=await fileToBase64(payFile.files[0]); }
+  catch(e){ console.warn('Screenshot error',e); }
 
-  // ── Save to MongoDB backend ──
+  // Save to backend
   try{
-    const allMembers=[
-      {role:'Team Leader',name:params.leaderName,email:params.leaderEmail,phone:params.leaderPhone},
-      ...params.members
-    ];
-    const response=await fetch('/api/register',{
+    const res=await fetch('/api/register',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        team_name:        params.teamName,
-        college:          params.college,
-        track:            params.track,
-        team_size:        params.teamSize,
-        fee:              params.fee,
-        utr:              params.utr,
-        project_title:    params.projectTitle,
-        project_desc:     params.projectDesc,
+        team_name:          params.teamName,
+        college:            params.college,
+        track:              params.track,
+        team_size:          params.teamSize,
+        fee:                params.fee,
+        utr:                params.utr,
+        project_title:      params.projectTitle,
+        project_desc:       params.projectDesc,
         payment_screenshot: paymentScreenshot,
-        members:          allMembers
+        members:            allMembers
       })
     });
-    const data=await response.json();
-    if(!response.ok){
+    const data=await res.json();
+    if(!res.ok){
       document.getElementById('sendingOverlay').classList.remove('show');
-      alert('Registration error: '+(data.message||'Please try again'));
+      alert('Error: '+(data.message||'Please try again'));
       return;
     }
-    // Store team ID for success modal
-    window._lastTeamId=data.teamId||'';
-  }catch(err){
+  } catch(err){
     console.error('Backend error:',err);
-    // Continue anyway — show success even if backend unreachable
+    // continue anyway
   }
 
-  // ── Send EmailJS notification (optional) ──
-  try{
-    await sendEmail(params);
-  }catch(err){
-    console.warn('EmailJS error (non-fatal):',err);
-  }
+  // Send EmailJS notification
+  try{ await sendEmail(params); }
+  catch(err){ console.warn('EmailJS error:',err); }
 
   document.getElementById('sendingOverlay').classList.remove('show');
   showSuccess(track,fee,true);
