@@ -209,6 +209,7 @@ tr:last-child td{border-bottom:none;}
               <th>Members</th>
               <th>UTR</th>
               <th>Fee</th>
+              <th>Payment</th>
               <th>Date</th>
               <th>Actions</th>
             </tr>
@@ -328,6 +329,11 @@ function renderTable(rows) {
         <td><div class="members-list">${r.member_names || '—'}</div></td>
         <td><div class="utr-code">${r.utr || '—'}</div></td>
         <td style="color:var(--green);font-family:'Orbitron',monospace;font-size:13px;font-weight:700">${r.fee || '—'}</td>
+        <td>
+          <span style="font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;padding:3px 10px;border:1px solid ${r.payment_status==='PAID'?'rgba(0,255,136,.4)':'rgba(255,107,0,.4)'};color:${r.payment_status==='PAID'?'var(--green)':'var(--orange)'}">
+            ${r.payment_status||'PENDING'}
+          </span>
+        </td>
         <td><div class="time-str">${date}</div></td>
         <td>
           <button class="action-btn" onclick="showDetail('${r.team_id}')">VIEW</button>
@@ -392,7 +398,9 @@ async function showDetail(teamId) {
       <div class="detail-row"><div class="detail-key">Track</div><div class="detail-val">${r.track}</div></div>
       <div class="detail-row"><div class="detail-key">Team Size</div><div class="detail-val">${r.team_size} Members</div></div>
       <div class="detail-row"><div class="detail-key">Fee</div><div class="detail-val" style="color:var(--green);font-family:'Orbitron',monospace;font-weight:700">${r.fee}</div></div>
-      <div class="detail-row"><div class="detail-key">UTR Number</div><div class="detail-val" style="font-family:'Share Tech Mono',monospace;color:var(--green)">${r.utr}</div></div>
+      <div class="detail-row"><div class="detail-key">UTR / Pay ID</div><div class="detail-val" style="font-family:'Share Tech Mono',monospace;color:var(--green)">${r.utr||r.razorpay_payment_id||'—'}</div></div>
+      <div class="detail-row"><div class="detail-key">Payment</div><div class="detail-val" style="color:${r.payment_status==='PAID'?'#00ff88':'#ff6b00'};font-family:'Orbitron',monospace;font-weight:700">${r.payment_status||'PENDING'}</div></div>
+      <div class="detail-row"><div class="detail-key">Razorpay ID</div><div class="detail-val" style="font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--accent)">${r.razorpay_payment_id||'—'}</div></div>
       <div class="detail-row"><div class="detail-key">Project</div><div class="detail-val">${r.project_title||'Not provided'}</div></div>
       <div class="detail-row"><div class="detail-key">Description</div><div class="detail-val" style="font-size:13px;color:var(--silver-d)">${r.project_desc||'Not provided'}</div></div>
       <div class="detail-row"><div class="detail-key">Registered</div><div class="detail-val" style="font-family:'Share Tech Mono',monospace;font-size:12px">${new Date(r.created_at).toLocaleString('en-IN')}</div></div>
