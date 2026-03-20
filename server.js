@@ -244,6 +244,7 @@ app.get('/api/stats', async (req, res) => {
 
 // ── Serve frontend ──────────────────────────────────────────────
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 
 // ── Start ───────────────────────────────────────────────────────
 app.listen(PORT, '0.0.0.0', () => {
