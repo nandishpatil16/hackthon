@@ -13,6 +13,12 @@ const crypto     = require('crypto');
 require('dotenv').config();
 
 const app  = express();
+
+// ── Razorpay Instance ──────────────────────────────────────────
+const razorpay = new Razorpay({
+  key_id:     process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
 const PORT = process.env.PORT || 3000;
 
 // ── MongoDB Connection ─────────────────────────────────────────
@@ -34,18 +40,22 @@ const memberSchema = new mongoose.Schema({
 });
 
 const registrationSchema = new mongoose.Schema({
-  team_id:            { type: String, unique: true },
-  team_name:          { type: String, required: true },
-  college:            { type: String, required: true },
-  track:              { type: String, required: true },
-  team_size:          String,
-  fee:                String,
-  utr:                { type: String, required: true },
-  project_title:      String,
-  project_desc:       String,
-  payment_screenshot: String,   // base64 image
-  members:            [memberSchema],
-  created_at:         { type: Date, default: Date.now },
+  team_id:              { type: String, unique: true },
+  team_name:            { type: String, required: true },
+  college:              { type: String, required: true },
+  track:                { type: String, required: true },
+  team_size:            String,
+  fee:                  String,
+  utr:                  String,
+  razorpay_order_id:    String,
+  razorpay_payment_id:  String,
+  razorpay_signature:   String,
+  payment_status:       { type: String, default: 'PENDING' },
+  project_title:        String,
+  project_desc:         String,
+  payment_screenshot:   String,
+  members:              [memberSchema],
+  created_at:           { type: Date, default: Date.now },
 });
 
 const Registration = mongoose.model('Registration', registrationSchema);
@@ -70,6 +80,46 @@ function generateTeamId() {
 }
 function validateEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
 
+// ── POST /api/create-order ────────────────────────────────────
+app.post('/api/create-order', async (req, res) => {
+  try {
+    const { amount, team_name } = req.body;
+    if (!amount || amount < 1)
+      return res.status(400).json({ success: false, message: 'Invalid amount' });
+
+    const order = await razorpay.orders.create({
+      amount:   amount * 100, // convert to paise
+      currency: 'INR',
+      receipt:  'receipt_' + Date.now(),
+      notes:    { team_name: team_name || '' }
+    });
+
+    console.log(`💳 Order created: ${order.id} — ₹${amount}`);
+    res.json({ success: true, orderId: order.id, amount: order.amount });
+  } catch (err) {
+    console.error('Razorpay order error:', err);
+    res.status(500).json({ success: false, message: 'Payment setup failed. Try again.' });
+  }
+});
+
+// ── POST /api/verify-payment ───────────────────────────────────
+app.post('/api/verify-payment', (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const secret = process.env.RAZORPAY_KEY_SECRET;
+    const body   = razorpay_order_id + '|' + razorpay_payment_id;
+    const expectedSig = crypto.createHmac('sha256', secret).update(body).digest('hex');
+
+    if (expectedSig === razorpay_signature) {
+      res.json({ success: true, message: 'Payment verified' });
+    } else {
+      res.status(400).json({ success: false, message: 'Payment verification failed' });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Verification error' });
+  }
+});
+
 // ── POST /api/register ─────────────────────────────────────────
 app.post('/api/register', limiter, async (req, res) => {
   try {
@@ -84,7 +134,7 @@ app.post('/api/register', limiter, async (req, res) => {
     if (!team_name?.trim())  errors.push('Team name is required');
     if (!college?.trim())    errors.push('College name is required');
     if (!track?.trim())      errors.push('Track is required');
-    if (!utr?.trim())        errors.push('UTR / Transaction number is required');
+    // UTR is optional now — Razorpay payment_id is used instead
 
     if (!Array.isArray(members) || members.length === 0) {
       errors.push('At least 1 member is required');
@@ -99,10 +149,12 @@ app.post('/api/register', limiter, async (req, res) => {
     if (errors.length > 0)
       return res.status(400).json({ success: false, message: errors[0], errors });
 
-    // ── Check duplicate UTR
-    const dupUTR = await Registration.findOne({ utr: utr.trim() });
-    if (dupUTR)
-      return res.status(409).json({ success: false, message: 'This UTR number has already been used for registration' });
+    // ── Check duplicate Razorpay payment ID
+    if (req.body.razorpay_payment_id) {
+      const dupPay = await Registration.findOne({ razorpay_payment_id: req.body.razorpay_payment_id });
+      if (dupPay)
+        return res.status(409).json({ success: false, message: 'This payment has already been used for registration' });
+    }
 
     // ── Check duplicate team name
     const dupTeam = await Registration.findOne({
@@ -113,18 +165,33 @@ app.post('/api/register', limiter, async (req, res) => {
 
     // ── Save registration
     const teamId = generateTeamId();
+    // ── Verify Razorpay signature if payment was made
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, payment_status } = req.body;
+    if (razorpay_payment_id && razorpay_signature && razorpay_order_id) {
+      const secret  = process.env.RAZORPAY_KEY_SECRET;
+      const body    = razorpay_order_id + '|' + razorpay_payment_id;
+      const expSig  = crypto.createHmac('sha256', secret).update(body).digest('hex');
+      if (expSig !== razorpay_signature) {
+        return res.status(400).json({ success: false, message: 'Payment verification failed! Contact organizers.' });
+      }
+    }
+
     const reg = new Registration({
-      team_id:            teamId,
-      team_name:          team_name.trim(),
-      college:            college.trim(),
-      track:              track.trim(),
-      team_size:          team_size || '',
-      fee:                fee || '',
-      utr:                utr.trim(),
-      project_title:      project_title?.trim() || '',
-      project_desc:       project_desc?.trim() || '',
-      payment_screenshot: payment_screenshot || '',
-      members:            members.map(m => ({
+      team_id:              teamId,
+      team_name:            team_name.trim(),
+      college:              college.trim(),
+      track:                track.trim(),
+      team_size:            team_size || '',
+      fee:                  fee || '',
+      utr:                  utr?.trim() || razorpay_payment_id || '',
+      razorpay_order_id:    razorpay_order_id   || '',
+      razorpay_payment_id:  razorpay_payment_id || '',
+      razorpay_signature:   razorpay_signature  || '',
+      payment_status:       payment_status || 'PENDING',
+      project_title:        project_title?.trim() || '',
+      project_desc:         project_desc?.trim()  || '',
+      payment_screenshot:   payment_screenshot    || '',
+      members:              members.map(m => ({
         role:  m.role  || '',
         name:  m.name?.trim()  || '',
         email: m.email?.trim().toLowerCase() || '',
