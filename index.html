@@ -6,6 +6,7 @@
 <title>HackHive 2026 | AITM Belagavi</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 9<style>
 :root{
   --blue:#4f9fff;
@@ -562,7 +563,7 @@ footer{border-top:1px solid var(--border);padding:clamp(28px,6vw,44px) clamp(16p
         </div>
       </div>
 
-      <div class="fg"><label>UTR / Transaction Number *</label><input type="text" id="utr-number" placeholder="Enter UTR / UPI reference number after payment"></div>
+      <div class="fg"><label>UTR / Transaction Number</label><input type="text" id="utr-number" placeholder="Auto-filled after Razorpay payment" readonly style="opacity:0.5;cursor:not-allowed"></div>
       <div class="fg" style="margin-bottom:0;">
         <label>Payment Screenshot *</label>
         <div class="pay-upload-box" id="payUploadBox">
@@ -981,32 +982,26 @@ function fileToBase64(file){
   });
 }
 
-/* ── SUBMIT ── */
-async function submitForm(){
-  // validate required
+/* ── RAZORPAY KEY ── */
+const RZP_KEY = 'rzp_live_Rser7hVoGOvSkn';
+const feeAmountMap = {2:500, 3:750, 4:1000}; // in rupees
+
+/* ── VALIDATE FORM ── */
+function validateForm(){
   const required=[
     {id:'m1-name',label:'Team Leader Name'},
     {id:'m1-email',label:'Team Leader Email'},
     {id:'m1-phone',label:'Team Leader Phone'},
     {id:'team-name',label:'Team Name'},
     {id:'college-name',label:'College Name'},
-    {id:'utr-number',label:'UTR / Transaction Number'}
   ];
   for(let f of required){
     const el=document.getElementById(f.id);
-    if(!el.value.trim()){
-      el.focus();el.style.borderColor='rgba(255,80,80,.6)';
-      setTimeout(()=>el.style.borderColor='',2000);
-      alert('Please fill in: '+f.label);return;
+    if(!el||!el.value.trim()){
+      el&&el.focus();
+      if(el){el.style.borderColor='rgba(255,80,80,.6)';setTimeout(()=>el.style.borderColor='',2000);}
+      alert('Please fill in: '+f.label);return false;
     }
-  }
-  // payment screenshot
-  const payFile=document.getElementById('pay-screenshot');
-  if(!payFile.files||!payFile.files[0]){
-    alert('Please upload your payment screenshot.');
-    const box=document.getElementById('payUploadBox');
-    if(box.style.display!=='none'){box.style.borderColor='rgba(255,80,80,.5)';setTimeout(()=>box.style.borderColor='',2000);}
-    return;
   }
   // captcha
   const ansVal=parseInt(document.getElementById('capAnswer').value);
@@ -1014,88 +1009,162 @@ async function submitForm(){
     document.getElementById('capAnswer').focus();
     document.getElementById('capAnswer').style.borderColor='rgba(255,80,80,.6)';
     setTimeout(()=>document.getElementById('capAnswer').style.borderColor='',2000);
-    alert('Please solve the human verification correctly.');return;
+    alert('Please solve the human verification correctly.');return false;
   }
+  return true;
+}
 
-  // gather all data
-  const track=document.getElementById('reg-track').value;
-  const size=document.getElementById('team-size').value;
-  const fee=feeMap[parseInt(size)].amount;
+/* ── SUBMIT — Opens Razorpay ── */
+async function submitForm(){
+  if(!validateForm()) return;
 
-  // Build members array — leader + other members
-  const otherMembers = getMemberDetails(); // now returns array of objects
+  const track = document.getElementById('reg-track').value;
+  const size  = parseInt(document.getElementById('team-size').value);
+  const fee   = feeMap[size].amount;
+  const feeRs = feeAmountMap[size];
+
+  const otherMembers = getMemberDetails();
   const allMembers = [
     {role:'Team Leader', name:document.getElementById('m1-name').value.trim(), email:document.getElementById('m1-email').value.trim(), phone:document.getElementById('m1-phone').value.trim()},
     ...otherMembers
   ];
 
-  const params={
-    teamName:     document.getElementById('team-name').value.trim(),
-    college:      document.getElementById('college-name').value.trim(),
-    track:        track==='software'?'💻 Software Track':'⚙️ Hardware Track',
-    teamSize:     size,
-    fee:          fee,
-    leaderName:   document.getElementById('m1-name').value.trim(),
-    leaderEmail:  document.getElementById('m1-email').value.trim(),
-    leaderPhone:  document.getElementById('m1-phone').value.trim(),
-    utr:          document.getElementById('utr-number').value.trim(),
-    projectTitle: document.getElementById('project-title').value.trim(),
-    projectDesc:  document.getElementById('project-desc').value.trim(),
-    members:      allMembers.map(m=>m.name).join(', ')
+  const formData = {
+    team_name:     document.getElementById('team-name').value.trim(),
+    college:       document.getElementById('college-name').value.trim(),
+    track:         track==='software'?'💻 Software Track':'⚙️ Hardware Track',
+    team_size:     String(size),
+    fee:           fee,
+    project_title: document.getElementById('project-title').value.trim(),
+    project_desc:  document.getElementById('project-desc').value.trim(),
+    members:       allMembers,
   };
 
-  // show sending overlay
+  // Get screenshot as base64 (optional now - no UTR needed)
+  let paymentScreenshot = '';
+  const payFile = document.getElementById('pay-screenshot');
+  if(payFile.files && payFile.files[0]){
+    try{ paymentScreenshot = await fileToBase64(payFile.files[0]); }catch(e){}
+  }
+  formData.payment_screenshot = paymentScreenshot;
+
+  // ── Create Razorpay Order from backend ──
   document.getElementById('sendingOverlay').classList.add('show');
 
-  // Convert screenshot to base64
-  let paymentScreenshot='';
-  try{ paymentScreenshot=await fileToBase64(payFile.files[0]); }
-  catch(e){ console.warn('Screenshot error',e); }
-
-  // Save to backend
+  let orderId = '';
   try{
-    const res=await fetch('/api/register',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        team_name:          params.teamName,
-        college:            params.college,
-        track:              params.track,
-        team_size:          params.teamSize,
-        fee:                params.fee,
-        utr:                params.utr,
-        project_title:      params.projectTitle,
-        project_desc:       params.projectDesc,
-        payment_screenshot: paymentScreenshot,
-        members:            allMembers
-      })
+    const orderRes = await fetch('/api/create-order', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ amount: feeRs, team_name: formData.team_name })
     });
-    const data=await res.json();
-    if(!res.ok){
+    const orderData = await orderRes.json();
+    if(!orderData.success){
       document.getElementById('sendingOverlay').classList.remove('show');
-      alert('Error: '+(data.message||'Please try again'));
+      alert('Payment setup failed: ' + (orderData.message||'Please try again'));
       return;
     }
+    orderId = orderData.orderId;
   } catch(err){
-    console.error('Backend error:',err);
-    // continue anyway
+    document.getElementById('sendingOverlay').classList.remove('show');
+    alert('Server error. Please try again.');
+    return;
   }
 
-  // Send EmailJS notification
-  try{ await sendEmail(params); }
-  catch(err){ console.warn('EmailJS error:',err); }
-
   document.getElementById('sendingOverlay').classList.remove('show');
-  showSuccess(track,fee,true);
-  genCaptcha();
+
+  // ── Open Razorpay Checkout ──
+  const options = {
+    key:         RZP_KEY,
+    amount:      feeRs * 100, // in paise
+    currency:    'INR',
+    name:        'HackHive 2026',
+    description: formData.track + ' — ' + formData.team_name,
+    image:       '',
+    order_id:    orderId,
+    prefill: {
+      name:    allMembers[0].name,
+      email:   allMembers[0].email,
+      contact: allMembers[0].phone,
+    },
+    notes: {
+      team_name: formData.team_name,
+      college:   formData.college,
+      track:     formData.track,
+    },
+    theme: { color: '#00c8ff' },
+    handler: async function(response){
+      // Payment successful! Now save registration
+      document.getElementById('sendingOverlay').classList.add('show');
+
+      try{
+        const regRes = await fetch('/api/register', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            ...formData,
+            utr:              response.razorpay_payment_id,
+            razorpay_order_id:    response.razorpay_order_id,
+            razorpay_payment_id:  response.razorpay_payment_id,
+            razorpay_signature:   response.razorpay_signature,
+            payment_status:       'PAID',
+          })
+        });
+        const regData = await regRes.json();
+        document.getElementById('sendingOverlay').classList.remove('show');
+
+        if(regData.success){
+          // Send EmailJS
+          try{
+            await sendEmail({
+              teamName:    formData.team_name,
+              college:     formData.college,
+              track:       formData.track,
+              teamSize:    formData.team_size,
+              fee:         formData.fee,
+              leaderName:  allMembers[0].name,
+              leaderEmail: allMembers[0].email,
+              leaderPhone: allMembers[0].phone,
+              utr:         response.razorpay_payment_id,
+              projectTitle:formData.project_title,
+              projectDesc: formData.project_desc,
+              members:     allMembers.map(m=>m.name).join(', '),
+            });
+          }catch(e){ console.warn('Email failed',e); }
+
+          showSuccess(track, fee, true, response.razorpay_payment_id);
+          genCaptcha();
+        } else {
+          alert('Registration save failed: '+(regData.message||'Contact organizers with Payment ID: '+response.razorpay_payment_id));
+        }
+      } catch(err){
+        document.getElementById('sendingOverlay').classList.remove('show');
+        alert('Payment done! But registration save failed. Payment ID: '+response.razorpay_payment_id+' — Please contact organizers!');
+      }
+    },
+    modal: {
+      ondismiss: function(){
+        console.log('Payment cancelled by user');
+      }
+    }
+  };
+
+  const rzp = new Razorpay(options);
+  rzp.on('payment.failed', function(response){
+    alert('Payment failed: ' + response.error.description);
+  });
+  rzp.open();
 }
 
-function showSuccess(track,fee,emailSent){
+function showSuccess(track,fee,emailSent,paymentId){
   document.getElementById('modal-track').textContent=(track.includes('software')||track.includes('💻')?'Software':'Hardware')+' Track — HackHive 2026';
   document.getElementById('modal-fee').textContent=fee;
   const emailNote=document.getElementById('modal-email-note');
-  if(emailSent){
-    emailNote.textContent='📧 Confirmation sent to organizers email.';
+  if(paymentId){
+    emailNote.innerHTML='✅ Payment Successful!<br><span style="color:var(--accent);letter-spacing:2px">ID: '+paymentId+'</span>';
+    emailNote.style.color='#39ff14';
+  } else if(emailSent){
+    emailNote.textContent='📧 Confirmation sent to organizers.';
     emailNote.style.color='#39ff14';
   } else {
     emailNote.textContent='';
