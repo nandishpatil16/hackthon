@@ -1,7 +1,7 @@
 {
-  "name": "hackforge-registration",
+  "name": "hackhive-registration",
   "version": "1.0.0",
-  "description": "HackForge 2025 Registration Backend",
+  "description": "HackHive 2026 AITM Belagavi Registration Backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -12,7 +12,6 @@
     "express": "^4.18.3",
     "express-rate-limit": "^7.2.0",
     "helmet": "^7.1.0",
-    "nodemailer": "^6.9.11",
-    "sqlite3": "^5.1.7"
+    "mongoose": "^8.2.0"
   }
 }
