@@ -19,12 +19,11 @@ const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 if (!MONGO_URI) {
   console.error('❌ MONGO_URI not set! Add it in Render environment variables.');
-  process.exit(1);
 }
 
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('✅ MongoDB connected!'))
-  .catch(err => { console.error('❌ MongoDB error:', err.message); process.exit(1); });
+  .then(() => console.log('✅ MongoDB connected successfully!'))
+  .catch(err => { console.error('❌ MongoDB connection error:', err.message); });
 
 // ── Schema ─────────────────────────────────────────────────────
 const memberSchema = new mongoose.Schema({
